@@ -2,17 +2,17 @@ import numpy as n
 import random as r
 
 data = n.load(r"MLdata\data.npy")
-weights = n.load(r"MLdata\weights.npy")
+weights = n.load(r"NN1\weights.npy")
 forgets = weights[0]
 inputs = weights[1]
 candidates = weights[2]
 outputs = weights[3]
-biases = n.load(r"MLdata\biases.npy") # f,i,c,o
-conv1 = n.load(r"MLdata\conv1.npy")
-conv2 = n.load(r"MLdata\conv2.npy")
-conv3 = n.load(r"MLdata\conv3.npy")
-finalmat = n.load(r"MLdata\final.npy")
-finalbias = n.load(r"MLdata\fbias.npy")
+biases = n.load(r"NN1\biases.npy") # f,i,c,o
+conv1 = n.load(r"NN1\conv1.npy")
+conv2 = n.load(r"NN1\conv2.npy")
+conv3 = n.load(r"NN1\conv3.npy")
+finalmat = n.load(r"NN1\final.npy")
+finalbias = n.load(r"NN1\fbias.npy")
 
 length = len(data)
 n.seterr(over='ignore')
@@ -51,7 +51,28 @@ def LSTM(ct, ht, xt):
     return ct1, ht1, ft, it, cat, ot
     
 
+def getrues(future):
+    true = []
+    current = future[0][3]
+    short = future[1][3]
+    long = future[-1][3]
+    if current < short:
+        true.append(1.0)
+    elif short < current:
+        true.append(-1.0)
+    else:
+        true.append(0.0)
+    true.append(abs(10*((short-current)/current)))
+    if current < long:
+        true.append(1.0)
+    elif long < current:
+        true.append(-1.0)
+    else:
+        true.append(0.0)
+    true.append(abs(10*((long-current)/current)))
+    return n.array(true)
 
+runs = 0
 stockcompleted = []
 #while len(stockcompleted) != length:
 stock = r.randint(0,length)
@@ -65,9 +86,9 @@ completed = []
 #
 portion = 10*r.randint(10,120)
 while portion in completed:
-    portion = 10*r.randint(10,120)
+    portion = 10*r.randint(10,118)
 
-subdata = initial[portion-100:portion]
+subdata = initial[portion-100:portion] #100 rows of 10
 
 # forward pass
 layer1 = convlayer(subdata, conv1)
@@ -86,7 +107,36 @@ outs = n.zeros((100, 32), dtype=n.float64)
 for i in range(0,100):
     cells[i+1], hiddens[i+1], forgots[i], inps[i], cands[i], outs[i] = LSTM(cells[i], hiddens[i], layerfull[i])
 
-answer = finalmat @ hiddens[100] #+ finalbias
+final32 = hiddens[100]
+answer = finalmat @ final32 + finalbias # short(prob, mag), long(prob, mag)
 print(answer)
 ## end of forward pass
+
+trues = getrues(initial[portion-1:portion+24]) # 25 rows of 10
+print(trues)
+cost = n.sum((answer-trues)**2)
+print(cost)
+
+# backprop
+if runs == 0:
+    conv1_g = n.zeros(size=(32, 7 ,10))
+    conv2_g = n.zeros(size=(64, 5, 32))
+    conv3_g = n.zeros(size=(64, 3, 64))
+    biases_g = n.zeros(size=(4, 32))
+    weights_g = n.zeros(size=(4, 32, 106))
+    finalmat_g = n.zeros(size=(4, 32))
+    finalbias_g = n.zeros(size=(4))
+
+
+deltaf = answer - trues
+for i in range(0,4):
+    for j in range(0,32):
+        finalmat_g += deltaf[i] * final32[j]
+    finalbias_g += deltaf[i]
+
+
+
+
+
+
 
