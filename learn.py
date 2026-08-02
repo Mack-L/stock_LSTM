@@ -1,5 +1,6 @@
 import numpy as n
 import random as r
+eta = 0.01
 
 data = n.load(r"MLdata\data.npy")
 weights = n.load(r"NN1\weights.npy")
@@ -18,10 +19,13 @@ length = len(data)
 n.seterr(over='ignore')
 
 def sigmoid(x):
-    return n.where(x >= 15, 1.0, n.where(x <= 15, 0.0, 1 / (1 + n.exp(-x))))
+    return n.where(x >= 15, 1.0, n.where(x <= -15, 0.0, 1 / (1 + n.exp(-x))))
 
 def tanh(x):
     return n.tanh(x)
+
+def leakyrelu(x):
+    return n.where(x < 0, 0.01*x, x)
 
 def convlayer(inputd, weights):
     channels = len(inputd[0])
@@ -36,7 +40,7 @@ def convlayer(inputd, weights):
             filterw = weights[j]
             section = padded[i:i+k]
             output[i][j] = n.sum(filterw * section)  # FIP
-    return output
+    return leakyrelu(output)
     #
 
 
@@ -48,7 +52,7 @@ def LSTM(ct, ht, xt):
     cat = tanh(candidates @ hxt + biases[3])
     ct1 = ct*ft + it*cat
     ht1 = tanh(ct1)*ot
-    return ct1, ht1, ft, it, cat, ot
+    return ct1, ht1, ft, it, cat, ot, hxt
     
 
 def getrues(future):
@@ -102,10 +106,11 @@ forgots = n.zeros((100, 32), dtype=n.float64)
 inps = n.zeros((100, 32), dtype=n.float64)
 cands = n.zeros((100, 32), dtype=n.float64)
 outs = n.zeros((100, 32), dtype=n.float64)
+zeds = n.zeros((100, 106), dtype=n.float64)
 
 
 for i in range(0,100):
-    cells[i+1], hiddens[i+1], forgots[i], inps[i], cands[i], outs[i] = LSTM(cells[i], hiddens[i], layerfull[i])
+    cells[i+1], hiddens[i+1], forgots[i], inps[i], cands[i], outs[i], zeds[i] = LSTM(cells[i], hiddens[i], layerfull[i])
 
 final32 = hiddens[100]
 answer = finalmat @ final32 + finalbias # short(prob, mag), long(prob, mag)
@@ -119,24 +124,59 @@ print(cost)
 
 # backprop
 if runs == 0:
-    conv1_g = n.zeros(size=(32, 7 ,10))
-    conv2_g = n.zeros(size=(64, 5, 32))
-    conv3_g = n.zeros(size=(64, 3, 64))
-    biases_g = n.zeros(size=(4, 32))
-    weights_g = n.zeros(size=(4, 32, 106))
-    finalmat_g = n.zeros(size=(4, 32))
-    finalbias_g = n.zeros(size=(4))
+    conv1_g = n.zeros((32, 7 ,10), dtype=n.float64)
+    conv2_g = n.zeros((64, 5, 32), dtype=n.float64)
+    conv3_g = n.zeros((64, 3, 64), dtype=n.float64)
+    biases_g = n.zeros((4, 32), dtype=n.float64)
+    weights_g = n.zeros((4, 32, 106), dtype=n.float64) #f,i,c,o
+    finalmat_g = n.zeros((4, 32), dtype=n.float64)
+    finalbias_g = n.zeros((4), dtype=n.float64)
 
 
-deltaf = answer - trues
+deltaf = answer - trues #dC/d answer
 for i in range(0,4):
     for j in range(0,32):
-        finalmat_g += deltaf[i] * final32[j]
-    finalbias_g += deltaf[i]
+        finalmat_g[i][j] -= eta* deltaf[i] * final32[j]
+    finalbias_g[i] -= eta* deltaf[i]
 
+finalmatT = finalmat.transpose()
+deltaf32 = finalmatT @ deltaf #dc/d final32    length = 32
 
+dht1 = deltaf32
+dct1 = n.zeros((32), dtype=n.float64)
 
+#LSTM backprop
+for t in range(99,-1,-1): # cells, hiddens, forgots, inps, cands, outs
+    dot = dht1 * tanh(cells[t+1])
+    dct1 += dht1 * outs[t] * (1 - (tanh(cells[t+1]))**2)
+    dft = cells[t] * dct1
+    dit = cands[t] * dct1
+    dcat = inps[t] * dct1
+    dct1 = forgots[t] * dct1
+    dpot = dot * outs[t] * (1-outs[t])
+    dpft = dft * forgots[t] * (1-forgots[t])
+    dpit = dit * inps[t] * (1-inps[t])
+    dpcat = dcat * cands[t] * (1-cands[t])
+    print(t)
+    
+    for i in range(0,32):
+        for j in range(0,106):
+            weights_g[0][i][j] -= eta* dpft[i] * zeds[t][j]
+            weights_g[1][i][j] -= eta* dpit[i] * zeds[t][j]
+            weights_g[2][i][j] -= eta* dpcat[i] * zeds[t][j]
+            weights_g[3][i][j] -= eta* dpot[i] * zeds[t][j]
+            
+    forgetsT = forgets.transpose()
+    inputsT = inputs.transpose()
+    candidatesT = candidates.transpose()
+    outputsT = outputs.transpose()
+    
+    dzt = forgetsT @ dpft + inputsT @ dpit + candidatesT @ dpcat + outputsT @ dpot
+    dht1 = dzt[:32]
+#
 
+##conv backprop
 
-
+#
+print("done")
 
