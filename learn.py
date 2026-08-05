@@ -3,17 +3,28 @@ import random as r
 eta = 0.01
 
 data = n.load(r"MLdata\data.npy")
-weights = n.load(r"NN1\weights.npy")
+goes = 0
+#try:
+#while True:
+#while goes != 24:
+
+location = "NN1"
+
+weights = n.load(location + r"\weights.npy")
 forgets = weights[0]
 inputs = weights[1]
 candidates = weights[2]
 outputs = weights[3]
-biases = n.load(r"NN1\biases.npy") # f,i,c,o
-conv1 = n.load(r"NN1\conv1.npy")
-conv2 = n.load(r"NN1\conv2.npy")
-conv3 = n.load(r"NN1\conv3.npy")
-finalmat = n.load(r"NN1\final.npy")
-finalbias = n.load(r"NN1\fbias.npy")
+biases = n.load(location + r"\biases.npy") # f,i,c,o
+conv1 = n.load(location + r"\conv1.npy")
+conv2 = n.load(location + r"\conv2.npy")
+conv3 = n.load(location + r"\conv3.npy")
+convbias = n.load(location + r"\convbias.npy") #1, 2, 2, 3, 3
+convb1 = convbias[0]
+convb2 = n.concatenate((convbias[1], convbias[2]))
+convb3 = n.concatenate((convbias[3], convbias[4]))
+finalmat = n.load(location + r"\final.npy")
+finalbias = n.load(location + r"\fbias.npy")
 
 length = len(data)
 n.seterr(over='ignore')
@@ -27,7 +38,10 @@ def tanh(x):
 def leakyrelu(x):
     return n.where(x < 0, 0.01*x, x)
 
-def convlayer(inputd, weights):
+def relud(x):
+    return n.where(x < 0, 0.01, 1)
+
+def convlayer(inputd, weights, cbiases):
     channels = len(inputd[0])
     length = len(inputd)
     k = len(weights[0])
@@ -39,7 +53,7 @@ def convlayer(inputd, weights):
         for j in range(0,outchannels):
             filterw = weights[j]
             section = padded[i:i+k]
-            output[i][j] = n.sum(filterw * section)  # FIP
+            output[i][j] = n.sum(filterw * section) + cbiases[j]  # FIP
     return leakyrelu(output)
     #
 
@@ -58,8 +72,9 @@ def LSTM(ct, ht, xt):
 def getrues(future):
     true = []
     current = future[0][3]
-    short = future[1][3]
-    long = future[-1][3]
+    short = (future[1][3]+future[2][3]+future[3][3]+future[4][3])/4
+    mid = (future[10][3]+future[11][3]+future[12][3]+future[13][3])/4
+    long = (future[-1][3]+future[-2][3]+future[-3][3]+future[-4][3])/4
     if current < short:
         true.append(1.0)
     elif short < current:
@@ -67,6 +82,13 @@ def getrues(future):
     else:
         true.append(0.0)
     true.append(abs(10*((short-current)/current)))
+    if current < mid:
+        true.append(1.0)
+    elif mid < current:
+        true.append(-1.0)
+    else:
+        true.append(0.0)
+    true.append(abs(10*((mid-current)/current)))
     if current < long:
         true.append(1.0)
     elif long < current:
@@ -95,9 +117,9 @@ while portion in completed:
 subdata = initial[portion-100:portion] #100 rows of 10
 
 # forward pass
-layer1 = convlayer(subdata, conv1)
-layer2 = convlayer(layer1, conv2)
-layer3 = convlayer(layer2, conv3)
+layer1 = convlayer(subdata, conv1, convb1)
+layer2 = convlayer(layer1, conv2, convb2)
+layer3 = convlayer(layer2, conv3, convb3)
 layerfull = n.concatenate((layer3, subdata), axis = 1)# 100rows of 74
 
 cells = n.zeros((101, 32), dtype=n.float64)
@@ -129,12 +151,12 @@ if runs == 0:
     conv3_g = n.zeros((64, 3, 64), dtype=n.float64)
     biases_g = n.zeros((4, 32), dtype=n.float64)
     weights_g = n.zeros((4, 32, 106), dtype=n.float64) #f,i,c,o
-    finalmat_g = n.zeros((4, 32), dtype=n.float64)
-    finalbias_g = n.zeros((4), dtype=n.float64)
+    finalmat_g = n.zeros((6, 32), dtype=n.float64)
+    finalbias_g = n.zeros((6), dtype=n.float64)
 
 
 deltaf = answer - trues #dC/d answer
-for i in range(0,4):
+for i in range(0,6):
     for j in range(0,32):
         finalmat_g[i][j] -= eta* deltaf[i] * final32[j]
     finalbias_g[i] -= eta* deltaf[i]
@@ -144,6 +166,7 @@ deltaf32 = finalmatT @ deltaf #dc/d final32    length = 32
 
 dht1 = deltaf32
 dct1 = n.zeros((32), dtype=n.float64)
+dxt = n.zeros((100, 64), dtype=n.float64)
 
 #LSTM backprop
 for t in range(99,-1,-1): # cells, hiddens, forgots, inps, cands, outs
@@ -157,7 +180,6 @@ for t in range(99,-1,-1): # cells, hiddens, forgots, inps, cands, outs
     dpft = dft * forgots[t] * (1-forgots[t])
     dpit = dit * inps[t] * (1-inps[t])
     dpcat = dcat * cands[t] * (1-cands[t])
-    print(t)
     
     for i in range(0,32):
         for j in range(0,106):
@@ -173,10 +195,17 @@ for t in range(99,-1,-1): # cells, hiddens, forgots, inps, cands, outs
     
     dzt = forgetsT @ dpft + inputsT @ dpit + candidatesT @ dpcat + outputsT @ dpot
     dht1 = dzt[:32]
+    dxt[t] = dzt[32:]
 #
 
-##conv backprop
+    ##conv backprop
+    dA3 = dxt * relud(layer3)
+    #
+        #runs += 1
+    #runs = 0
+    #goes += 1
+#goes = 0
 
-#
+#except KeyboardInterrupt:
 print("done")
 
