@@ -43,16 +43,14 @@ def relud(x):
 
 def convlayer(inputd, weights, cbiases):
     channels = len(inputd[0])
-    length = len(inputd)
     k = len(weights[0])
+    length = len(inputd) - k + 1
     outchannels = len(weights)
-    pad = n.zeros((k//2, channels), dtype=n.float64)
-    padded = n.concatenate((pad, inputd, pad))
     output = n.empty((length, outchannels), dtype=n.float64)
     for i in range(0,length):
         for j in range(0,outchannels):
             filterw = weights[j]
-            section = padded[i:i+k]
+            section = inputd[i:i+k]
             output[i][j] = n.sum(filterw * section) + cbiases[j]  # FIP
     return leakyrelu(output)
     #
@@ -107,20 +105,21 @@ while stock in stockcompleted:
 initial = data[stock]
 completed = []
 
-#while len(completed) != 110:
+#while len(completed) != 108:
 #
 #
-portion = 10*r.randint(10,120)
+portion = 10*r.randint(12,120)
 while portion in completed:
-    portion = 10*r.randint(10,118)
+    portion = 10*r.randint(12,120)
 
-subdata = initial[portion-100:portion] #100 rows of 10
+subdata = initial[portion-112:portion] #112 rows of 10
 
 # forward pass
-layer1 = convlayer(subdata, conv1, convb1)
-layer2 = convlayer(layer1, conv2, convb2)
-layer3 = convlayer(layer2, conv3, convb3)
-layerfull = n.concatenate((layer3, subdata), axis = 1)# 100rows of 74
+layer1 = convlayer(subdata, conv1, convb1) # 106 rows
+layer2 = convlayer(layer1, conv2, convb2) # 102 rows
+layer3 = convlayer(layer2, conv3, convb3) # 100 rows
+subdata = subdata[12:] # 100 rows
+layerfull = n.concatenate((layer3, subdata), axis = 1) # 100rows of 74
 
 cells = n.zeros((101, 32), dtype=n.float64)
 hiddens = n.zeros((101, 32), dtype=n.float64)
@@ -136,11 +135,11 @@ for i in range(0,100):
 
 final32 = hiddens[100]
 answer = finalmat @ final32 + finalbias # short(prob, mag), long(prob, mag)
-print(answer)
+print(answer) # 6
 ## end of forward pass
 
 trues = getrues(initial[portion-1:portion+24]) # 25 rows of 10
-print(trues)
+print(trues) # 6 
 cost = n.sum((answer-trues)**2)
 print(cost)
 
@@ -148,6 +147,9 @@ print(cost)
 if runs == 0:
     conv1_g = n.zeros((32, 7 ,10), dtype=n.float64)
     conv2_g = n.zeros((64, 5, 32), dtype=n.float64)
+    conv3b_g = n.zeros((64), dtype=n.float64)
+    conv1b_g = n.zeros((32), dtype=n.float64)
+    conv2b_g = n.zeros((64), dtype=n.float64)
     conv3_g = n.zeros((64, 3, 64), dtype=n.float64)
     biases_g = n.zeros((4, 32), dtype=n.float64)
     weights_g = n.zeros((4, 32, 106), dtype=n.float64) #f,i,c,o
@@ -195,11 +197,17 @@ for t in range(99,-1,-1): # cells, hiddens, forgots, inps, cands, outs
     
     dzt = forgetsT @ dpft + inputsT @ dpit + candidatesT @ dpcat + outputsT @ dpot
     dht1 = dzt[:32]
-    dxt[t] = dzt[32:]
+    dxt[t] = dzt[32:96]
 #
 
     ##conv backprop
     dA3 = dxt * relud(layer3)
+    
+    
+    
+    conv3b_g -= eta * n.sum(dA3, axis = 0)
+    #for chan in range(0,64):
+        
     #
         #runs += 1
     #runs = 0
